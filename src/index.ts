@@ -1,47 +1,29 @@
 import { OpenAI } from "langchain/llms/openai";
-import { PromptTemplate } from "langchain/prompts";
+import { RetrievalQAChain } from "langchain/chains";
+import { GithubRepoLoader } from "langchain/document_loaders/web/github";
+import { HNSWLib } from "langchain/vectorstores/hnswlib";
+import { OpenAIEmbeddings } from "langchain/embeddings/openai";
 import * as dotenv from "dotenv";
-import { LLMChain, SimpleSequentialChain } from "langchain/chains";
 
 dotenv.config();
 
-const outlineChain = async (): Promise<LLMChain<string>> => {
-    const outlinePromptTemplate = new PromptTemplate({
-        inputVariables: ["title"],
-        template: `あなたは脚本家です。劇のタイトルが与えられたら、そのタイトルの概要を書くのがあなたの仕事です。
-
-        タイトル: {title}
-        概要:`,
-    });
-
-    const model = new OpenAI();
-    const chain = new LLMChain({ llm: model, prompt: outlinePromptTemplate });
-    return chain;
-};
-
-const reviewChain = async (): Promise<LLMChain<string>> => {
-    const reviewPromptTemplate = new PromptTemplate({
-        inputVariables: ["outline"],
-        template: `あなたはニューヨーク・タイムズの批評家です。劇のあらすじを聞いて、その劇の批評を書くのがあなたの仕事です。
-
-        劇の概要: {outline}
-        批評:`,
-    });
-
-    const model = new OpenAI();
-    const chain = new LLMChain({ llm: model, prompt: reviewPromptTemplate });
-    return chain;
-};
-
-
 export const run = async () => {
-    const outline = await outlineChain();
-    const review = await reviewChain();
-    const chain = new SimpleSequentialChain({
-        chains: [outline, review],
-        verbose: true,
+    const loader = new GithubRepoLoader(
+        "https://github.com/ikanago/dotfiles",
+        {
+            branch: "main",
+            recursive: false,
+            unknown: "warn"
+        }
+    );
+    const docs = await loader.load();
+    const vectorStore = await HNSWLib.fromDocuments(docs, new OpenAIEmbeddings());
+
+    const model = new OpenAI();
+    const chain = RetrievalQAChain.fromLLM(model, vectorStore.asRetriever());
+    const res = await chain.call({
+        query: "What OS does this repo support?"
     });
-    const res = await chain.run({ title: "ハムレット" });
     console.log(res);
 };
 
